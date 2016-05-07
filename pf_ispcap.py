@@ -10,8 +10,10 @@ import subprocess
 import xml.etree.ElementTree as et
 import time
 import json
-from time import sleep
-
+from datetime import datetime
+from datetime import timedelta
+import dateutil.parser
+import math
 
 class Conf(object):
     """
@@ -31,11 +33,18 @@ class Conf(object):
     # isp_cap.  isp bandwidth cap in gigabytes
     # These defaults are overridden in the pfsense configuration <pf-ispcap> section
 
+
+    factor = {
+        'SI': 1000,
+        'IEC': 1024
+    }
+
     settings = {
         'reset_day': 1,
-        'conversion': 1000,
+        'conversion': factor['SI'],
         'interval': 60,
-        'isp_cap': 1000
+        'isp_cap': 1000,
+        'use_localtime': True
     }
 
     @classmethod
@@ -62,6 +71,54 @@ class Conf(object):
                         cls.settings[setting] = value.text
 
 
+class Timestamp(datetime):
+
+    def __init__(self, ts=time.time()):
+        try:
+            ts_datetime = datetime.fromtimestamp(ts)
+        except TypeError:
+            ts_datetime = dateutil.parser.parse(ts)
+        super(Timestamp, self).__init__(ts_datetime.year, ts_datetime.month, ts_datetime.day,
+                                        ts_datetime.hour, ts_datetime.minute, ts_datetime.second,
+                                        ts_datetime.microsecond, ts_datetime.tzinfo)
+
+    def __new__(cls, ts=time.time()):
+        try:
+            ts_datetime = datetime.fromtimestamp(ts)
+        except TypeError:
+            ts_datetime = dateutil.parser.parse(ts)
+
+        ts_args = (ts_datetime.year, ts_datetime.month, ts_datetime.day,
+                   ts_datetime.hour, ts_datetime.minute,
+                   ts_datetime.second, ts_datetime.microsecond, ts_datetime.tzinfo )
+
+        return super(Timestamp, cls).__new__(cls, *ts_args)
+
+    def __str__(self):
+        return self.isoformat()
+
+class Util(object):
+
+    @staticmethod
+    def bytes_to_mb_sec(bytes, sec):
+        """
+        Get Megabits/sec from bytes and seconds
+
+        Rates are always in SI units.
+
+        :param bytes:
+        :param sec:
+        :return: megabits/sec
+        """
+        if sec == 0:
+            syslog.syslog("Warning: given no time to calculate mb/sec")
+            sec = 1
+        return (bytes * 8 / math.pow(Conf.factor['SI'],2)) /sec
+
+    @staticmethod
+    def bytes_to_GB(bytes):
+        return bytes/ math.pow(Conf.settings['conversion'],3 )
+
 class Interface(object):
     counted = ('In4/Pass','In4/Block','Out4/Pass',
                'In6/Pass', 'In6/Block', 'Out6/Pass')
@@ -83,17 +140,13 @@ class IntervalDiff(Interface):
 
     def _calc_diff(self):
         # undecided how to handle rollover, reboot or cleared events.  not implemented yet.
-        self.diff['seconds'] = self.current.timestamp - self.previous.timestamp
-
-        # for testing purposes
-        if self.diff['seconds'] == 0:
-            self.diff['seconds'] = 1
+        self.diff['time_delta'] = self.current.timestamp - self.previous.timestamp
 
         for key in self.counted:
             self.diff[key] = self.current.values[key] - self.previous.values[key]
         for key in self.counted_sum:
             self.diff[key] =  self.current.values_sum[key] - self.previous.values_sum[key]
-        self.diff['mbs'] = (self.diff['All'] * 8 / 1000000 ) / self.diff['seconds']
+        self.diff['mbs'] = Util.bytes_to_mb_sec(self.diff['All'],self.diff['time_delta'].total_seconds())
         self.diff['begin'], self.diff['end'] = self.previous.timestamp, self.current.timestamp
 
     def __str__(self):
@@ -101,6 +154,7 @@ class IntervalDiff(Interface):
 
     def __repr__(self):
         return json.dumps(self.diff, indent=2)
+
 
 class PfCtl(Interface):
     """
@@ -150,11 +204,18 @@ class PfCtl(Interface):
         """
         self.last_values = self.values
         self._reset_values()
-        self.timestamp = time.time()
+        self.timestamp = Timestamp()
+        self.cleared = None
 
         for line in self.interface_raw.splitlines():
             try:
                 line_l = line.split()
+                if line_l[0] == "Cleared:":
+                    try:
+                        self.cleared = Timestamp(" ".join(line_l[1::]))
+                    except:
+                        syslog.syslog("Unable to parse last Cleared: timestamp")
+                    continue
                 if_key, if_value = [line_l[i] for i in (0,5)]
                 if_key = if_key.rstrip(":")
                 if if_key in self.counted:
@@ -179,14 +240,14 @@ def main():
     print "wan interface", Conf.wan_if
     print "reset day", Conf.settings['reset_day']
 
-    pf = PfCtl()
-    pf.process_interface()
-    print pf
-    sleep(60)
-    next = PfCtl()
-    next.process_interface()
-    print next
-    print repr(IntervalDiff(pf, next))
+    first = PfCtl()
+    first.process_interface()
+    print first
+    time.sleep(60)
+    second = PfCtl()
+    second.process_interface()
+    print second
+    print repr(IntervalDiff(first, second))
 
 if __name__ == "__main__":
 

@@ -4,6 +4,7 @@ import pf_ispcap
 
 first = """\
 igb0
+	Cleared:     Fri Apr 22 14:22:28 2016
 	References:  46
 	In4/Pass:    [ Packets: 60939634           Bytes: 78438191152        ]
 	In4/Block:   [ Packets: 19863              Bytes: 1337478            ]
@@ -17,6 +18,7 @@ igb0
 
 second = """\
 igb0
+	Cleared:     Fri Apr 22 14:22:28 2016
 	References:  46
 	In4/Pass:    [ Packets: 60939948           Bytes: 78438271821        ]
 	In4/Block:   [ Packets: 19866              Bytes: 1337700            ]
@@ -52,10 +54,10 @@ class TestConfig(unittest.TestCase):
         pf_ispcap.Conf.read_conf(self.config_fh)
 
     def test_interface(self):
-        self.assertEqual(pf_ispcap.Conf.wan_if, "igb0")
+        self.assertEqual( "igb0", pf_ispcap.Conf.wan_if)
 
     def test_reset_day(self):
-        self.assertEqual(pf_ispcap.Conf.settings['reset_day'], 2)
+        self.assertEqual( 2, pf_ispcap.Conf.settings['reset_day'])
 
 class TestParse(unittest.TestCase):
 
@@ -75,24 +77,44 @@ class TestParse(unittest.TestCase):
         start_values = dict(zip(self.start.counted, _start_values))
         for start_key, start_val in start_values.items():
             self.assertTrue(start_key in self.start.values)
-            self.assertEqual(self.start.values[start_key], start_val)
+            self.assertEqual(start_val, self.start.values[start_key])
 
         _stop_values = (78438271821, 1337700, 2971407561, 22073733513, 2630798, 1796213111)
         stop_values = dict(zip(self.stop.counted, _stop_values))
         for stop_key, stop_val in stop_values.items():
             self.assertTrue(stop_key in self.stop.values)
-            self.assertEqual(self.stop.values[stop_key], stop_val)
+            self.assertEqual(stop_val, self.stop.values[stop_key])
+
+    def testCleared(self):
+        self.assertEquals("2016-04-22T14:22:28", str(self.start.cleared))
+
+    def testTimestampTime(self):
+        ts = pf_ispcap.Timestamp(1462647526.178073)
+        self.assertEquals('2016-05-07T11:58:46.178073', str(ts))
+
+    def testTimestampParseISO(self):
+        ts = pf_ispcap.Timestamp('2016-05-07T11:58:46.178073')
+        self.assertEquals('2016-05-07T11:58:46.178073', str(ts))
+
+    def testTimestampParseCtime(self):
+        ts = pf_ispcap.Timestamp('Sat May  7 11:58:46 2016')
+        self.assertEquals('2016-05-07T11:58:46', str(ts))
 
     def testInOut(self):
-        self.assertEqual(self.start.values_sum['In'], 78438191152 + 1337478 + 22073635368 + 2630798)
-        self.assertEqual(self.start.values_sum['Out'], 2971388050 + 1796168437)
+        self.assertEqual(78438191152 + 1337478 + 22073635368 + 2630798, self.start.values_sum['In'])
+        self.assertEqual(2971388050 + 1796168437, self.start.values_sum['Out'])
 
     def testIntervalDiff(self):
         i_diff = pf_ispcap.IntervalDiff(self.start, self.stop)
-        self.assertEqual(i_diff.diff['In'], 78438271821 + 1337700 + 22073733513 + 2630798
-                         - 78438191152 - 1337478 - 22073635368 - 2630798)
-        self.assertEqual(i_diff.diff['Out'], 2971407561 + 1796213111
-                         - 2971388050 - 1796168437)
+        self.assertEqual(78438271821 + 1337700 + 22073733513 + 2630798 \
+                         - 78438191152 - 1337478 - 22073635368 - 2630798, i_diff.diff['In'])
+        self.assertEqual(2971407561 + 1796213111 - 2971388050 - 1796168437, i_diff.diff['Out'])
+
+    def testIntervalDiffTimestamp(self):
+        self.start.timestamp = pf_ispcap.Timestamp("Sat May  7 13:53:26 PDT 2016")
+        self.stop.timestamp = pf_ispcap.Timestamp("Sat May  7 13:54:26 PDT 2016")
+        i_diff = pf_ispcap.IntervalDiff(self.start, self.stop)
+        self.assertEquals(60, i_diff.diff['time_delta'].total_seconds())
 
 if __name__ == '__main__':
     unittest.main()
