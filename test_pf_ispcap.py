@@ -89,15 +89,15 @@ class TestParse(unittest.TestCase):
         self.assertEquals("2016-04-22T14:22:28", str(self.start.cleared))
 
     def testTimestampTime(self):
-        ts = pf_ispcap.Timestamp(1462647526.178073)
-        self.assertEquals('2016-05-07T11:58:46.178073', str(ts))
+        ts = pf_ispcap.Timestamp.fromtimestamp(1462647526.178073)
+        self.assertEquals('2016-05-07T11:58:46', str(ts))
 
     def testTimestampParseISO(self):
-        ts = pf_ispcap.Timestamp('2016-05-07T11:58:46.178073')
-        self.assertEquals('2016-05-07T11:58:46.178073', str(ts))
+        ts = pf_ispcap.Timestamp.from_iso('2016-05-07T11:58:46.178073')
+        self.assertEquals('2016-05-07T11:58:46', str(ts))
 
     def testTimestampParseCtime(self):
-        ts = pf_ispcap.Timestamp('Sat May  7 11:58:46 2016')
+        ts = pf_ispcap.Timestamp.from_ctime('Sat May  7 11:58:46 2016')
         self.assertEquals('2016-05-07T11:58:46', str(ts))
 
     def testInOut(self):
@@ -111,10 +111,18 @@ class TestParse(unittest.TestCase):
         self.assertEqual(2971407561 + 1796213111 - 2971388050 - 1796168437, i_diff.diff['Out'])
 
     def testIntervalDiffTimestamp(self):
-        self.start.timestamp = pf_ispcap.Timestamp("Sat May  7 13:53:26 PDT 2016")
-        self.stop.timestamp = pf_ispcap.Timestamp("Sat May  7 13:54:26 PDT 2016")
+        self.start.timestamp = pf_ispcap.Timestamp.from_ctime("Sat May  7 13:53:26 2016")
+        self.stop.timestamp = pf_ispcap.Timestamp.from_ctime("Sat May  7 13:54:26 2016")
         i_diff = pf_ispcap.IntervalDiff(self.start, self.stop)
-        self.assertEquals(60, i_diff.diff['time_delta'].total_seconds())
+        self.assertEquals(60, i_diff.diff['seconds'])
+
+    def testIntervalSerialize(self):
+        self.start.timestamp = pf_ispcap.Timestamp.from_ctime("Sat May  7 13:53:26 2016")
+        self.stop.timestamp = pf_ispcap.Timestamp.from_ctime("Sat May  7 13:54:26 2016")
+        i_diff = pf_ispcap.IntervalDiff(self.start, self.stop)
+        print i_diff.diff
+        print str(i_diff)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -11,9 +11,10 @@ import xml.etree.ElementTree as et
 import time
 import json
 from datetime import datetime
-from datetime import timedelta
-import dateutil.parser
 import math
+
+# not found on pfsense :-(
+#import dateutil.parser
 
 class Conf(object):
     """
@@ -44,7 +45,6 @@ class Conf(object):
         'conversion': factor['SI'],
         'interval': 60,
         'isp_cap': 1000,
-        'use_localtime': True
     }
 
     @classmethod
@@ -73,29 +73,21 @@ class Conf(object):
 
 class Timestamp(datetime):
 
-    def __init__(self, ts=time.time()):
-        try:
-            ts_datetime = datetime.fromtimestamp(ts)
-        except TypeError:
-            ts_datetime = dateutil.parser.parse(ts)
-        super(Timestamp, self).__init__(ts_datetime.year, ts_datetime.month, ts_datetime.day,
-                                        ts_datetime.hour, ts_datetime.minute, ts_datetime.second,
-                                        ts_datetime.microsecond, ts_datetime.tzinfo)
+    @classmethod
+    def from_ctime(cls, ctime):
+        ts_datetime =  time.strptime(ctime, "%a %b %d %H:%M:%S %Y")[:6]
+        return cls(*ts_datetime)
 
-    def __new__(cls, ts=time.time()):
-        try:
-            ts_datetime = datetime.fromtimestamp(ts)
-        except TypeError:
-            ts_datetime = dateutil.parser.parse(ts)
-
-        ts_args = (ts_datetime.year, ts_datetime.month, ts_datetime.day,
-                   ts_datetime.hour, ts_datetime.minute,
-                   ts_datetime.second, ts_datetime.microsecond, ts_datetime.tzinfo )
-
-        return super(Timestamp, cls).__new__(cls, *ts_args)
+    @classmethod
+    def from_iso(cls, iso):
+        ts_datetime =  time.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S")[:6]
+        return cls(*ts_datetime)
 
     def __str__(self):
-        return self.isoformat()
+        return str(self.isoformat()[:19])
+
+    def __repr__(self):
+        return self.__str__()
 
 class Util(object):
 
@@ -113,7 +105,7 @@ class Util(object):
         if sec == 0:
             syslog.syslog("Warning: given no time to calculate mb/sec")
             sec = 1
-        return (bytes * 8 / math.pow(Conf.factor['SI'],2)) /sec
+        return round((bytes * 8 / math.pow(Conf.factor['SI'],2)) /sec,2)
 
     @staticmethod
     def bytes_to_GB(bytes):
@@ -140,19 +132,21 @@ class IntervalDiff(Interface):
 
     def _calc_diff(self):
         # undecided how to handle rollover, reboot or cleared events.  not implemented yet.
-        self.diff['time_delta'] = self.current.timestamp - self.previous.timestamp
+        time_delta =  self.current.timestamp - self.previous.timestamp
+        self.diff['seconds'] = int(time_delta.total_seconds())
 
         for key in self.counted:
             self.diff[key] = self.current.values[key] - self.previous.values[key]
         for key in self.counted_sum:
             self.diff[key] =  self.current.values_sum[key] - self.previous.values_sum[key]
-        self.diff['mbs'] = Util.bytes_to_mb_sec(self.diff['All'],self.diff['time_delta'].total_seconds())
-        self.diff['begin'], self.diff['end'] = self.previous.timestamp, self.current.timestamp
+        self.diff['mbs'] = Util.bytes_to_mb_sec(self.diff['All'],self.diff['seconds'])
+        self.diff['begin'], self.diff['end'] = str(self.previous.timestamp), str(self.current.timestamp)
 
     def __str__(self):
-        return repr(self.diff)
+        return json.dumps(self.diff, indent=2)
 
     def __repr__(self):
+        #return repr(self.diff)
         return json.dumps(self.diff, indent=2)
 
 
@@ -204,7 +198,7 @@ class PfCtl(Interface):
         """
         self.last_values = self.values
         self._reset_values()
-        self.timestamp = Timestamp()
+        self.timestamp = Timestamp.now()
         self.cleared = None
 
         for line in self.interface_raw.splitlines():
@@ -212,7 +206,7 @@ class PfCtl(Interface):
                 line_l = line.split()
                 if line_l[0] == "Cleared:":
                     try:
-                        self.cleared = Timestamp(" ".join(line_l[1::]))
+                        self.cleared = Timestamp.from_ctime(" ".join(line_l[1::]))
                     except:
                         syslog.syslog("Unable to parse last Cleared: timestamp")
                     continue
@@ -229,8 +223,7 @@ class PfCtl(Interface):
         self._calc_values_sum()
 
     def __str__(self):
-        return time.ctime(self.timestamp) + " :" + repr(self.values) + repr(self.values_sum)
-
+        return str(self.timestamp) + " :" + repr(self.values) + repr(self.values_sum)
 
 def main():
     Conf.system_config_filename = "/tmp/test/config.xml"
